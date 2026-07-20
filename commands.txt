@@ -17,4 +17,4 @@ git commit -m "Initial project upload"
 git branch -M main
 
 # 7. Upload the project
-git push -u origin main
+git push -u origin mai
