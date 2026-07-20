@@ -1,0 +1,20 @@
+# 1. Navigate to your project folder
+cd C:\Users\Jude\OneDrive\Desktop\Python\VSPMS
+
+# 2. Initialize Git
+git init
+
+# 3. Connect the GitHub repository
+git remote add origin https://github.com/jootkoo/VSPMS.git
+
+# 4. Add your files
+git add .
+
+# 5. Create your first commit
+git commit -m "Initial project upload"
+
+# 6. Rename the branch to main
+git branch -M main
+
+# 7. Upload the project
+git push -u origin main
