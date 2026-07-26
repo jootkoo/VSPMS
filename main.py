@@ -2,7 +2,7 @@ from serviceLog import dLinkedList
 from priorityRepairs import maxHeap
 from repairProcess import Graph
 from appointments import Stack
-
+from partsInventory import BinarySearchTree
 
 class Vehicle:
     def __init__(self, vin, make, model, year):
@@ -502,6 +502,53 @@ if __name__ == '__main__':
             else:
                 print("Invalid command.")
 
+    def pinventory():
+        inventory = BinarySearchTree()
+
+        while True:
+            command = input("add, delete, search, show : ").strip().lower()
+
+            if command == "add": #append appointment to stack
+                item = input("Enter item : ")
+                itemNum = int(input("Enter item num : "))
+                inventory.insert(itemNum, item)
+
+            elif command == "delete": 
+                item = int(input("Enter item num to delete : "))
+                inventory.delete(item)
+
+            elif command == "search":
+                item = int(input("Enter item num to search : "))
+                print(inventory.search(item))
+                pass
+
+            elif command == "show":
+                print("ORDERS: showall, inorder, preoder, postorder")
+                order = str(input("Select order: "))
+                if order == 'inorder':
+                    for i in inventory.traverse('inorder'):
+                        print(i)
+                elif order == 'preorder':
+                    for i in inventory.traverse('preorder'):
+                        print(i)
+                elif order == 'postorder':
+                    for i in inventory.traverse('postorder'):
+                        print(i)
+                elif order == 'showall':
+                    print(inventory)
+                else:
+                    print("Invalid command.")
+
+            elif command == "quit":
+                break
+            else:
+                print("Invalid command.")
+
+
+
+
+
+    pinventory()
     schedule()
     RepairProcess()
     pRepairs()
