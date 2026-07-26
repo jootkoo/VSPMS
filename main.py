@@ -379,7 +379,7 @@ if __name__ == '__main__':
             "fuel leak",
             "complete brake failure",
             "engine overheating",
-            "tire sidewall_bulge",
+            "tire sidewall bulge",
             "flashing check engine light",
             "brake pad replacement",
             "transmission slipping",
@@ -394,7 +394,7 @@ if __name__ == '__main__':
         #declare graph
         g = Graph(directed=True)
         add_all_workflows_to_graph(g)
-        #print(g)
+        print(g)
 
         for service in SERVICES:
             print(service)
@@ -410,6 +410,20 @@ if __name__ == '__main__':
         current_index = 0
         #looks through dict and grab the service the user chose
         procedures = repair_workflows[service_name]
+
+        def timeToComplete():
+            current_index = 0
+            step, minutes = procedures[current_index]
+            time = 0
+
+            while current_index < len(procedures):
+                time += minutes
+                current_index += 1
+            print("Total Service Time: ")
+            print(f"{time//60} hours and {time % 60} minutes")
+
+
+        timeToComplete()
 
         def print_current_step():
             step, minutes = procedures[current_index] #grabs the two perameters in the procedure
