@@ -1,6 +1,9 @@
 from serviceLog import dLinkedList
 from priorityRepairs import maxHeap
 from repairProcess import Graph
+from appointments import Stack
+
+
 class Vehicle:
     def __init__(self, vin, make, model, year):
         self.vin = vin
@@ -454,16 +457,52 @@ if __name__ == '__main__':
         else:
             print(f"\n{service_name.title()} workflow is complete.")
 
-
-
-
         print(g.bfs("fuel leak"))
         
-
     def schedule():
-        pass
+        undo_stack = Stack() #initialize the stack
+        redo_stack = Stack()
+        appointments = []
 
+        while True:
+            command = input("add, undo, redo, show, or quit: ").strip().lower()
 
+            if command == "add": #append appointment to stack
+                appointment = input("Enter appointment: ")
+
+                appointments.append(appointment)
+                undo_stack.push(("add", appointment))
+
+                #new action clears redo history
+                redo_stack = Stack()
+
+            elif command == "undo": 
+                if undo_stack.is_empty():
+                    print("Nothing to undo.")
+                    continue
+                action, appointment = undo_stack.pop()
+                if action == "add":
+                    appointments.remove(appointment) #removes recent addition 
+                    redo_stack.push((action, appointment)) #adds the recent deletion to the redo stack
+
+            elif command == "redo":
+                if redo_stack.is_empty():
+                    print("Nothing to redo.") #if empty
+                    continue
+                action, appointment = redo_stack.pop() #initialize tuple , "action , appointment"
+                if action == "add":
+                    appointments.append(appointment)
+                    undo_stack.push((action, appointment))
+
+            elif command == "show":
+                print(appointments)
+
+            elif command == "quit":
+                break
+            else:
+                print("Invalid command.")
+
+    schedule()
     RepairProcess()
     pRepairs()
     current_log = repairWorkflow()
