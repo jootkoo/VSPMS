@@ -2,6 +2,7 @@ from serviceLog import dLinkedList
 from priorityRepairs import maxHeap
 from repairProcess import Graph
 from appointments import Stack
+from appointmentsQueue import Queue
 from partsInventoryTree import BinarySearchTree
 from partsInventoryHash import HashMap
 
@@ -463,47 +464,69 @@ if __name__ == '__main__':
         print(g.bfs("fuel leak"))
         
     def schedule():
-        undo_stack = Stack() #initialize the stack
+        appointments = Queue()
+        undo_stack = Stack()
         redo_stack = Stack()
-        appointments = []
 
         while True:
-            command = input("add, undo, redo, show, or quit: ").strip().lower()
+            command = input("add, process, undo, redo, show, or quit: ").strip().lower()
 
-            if command == "add": #append appointment to stack
-                appointment = input("Enter appointment: ")
-
-                appointments.append(appointment)
+            if command == "add":
+                appointment = input("Enter appointment: ").strip()
+                appointments.enqueue(appointment)
                 undo_stack.push(("add", appointment))
-
-                #new action clears redo history
                 redo_stack = Stack()
 
-            elif command == "undo": 
+            elif command == "process":
+                if appointments.is_empty():
+                    print("No appointments to process.")
+                    continue
+
+                appointment = appointments.dequeue()
+                undo_stack.push(("process", appointment))
+                redo_stack = Stack()
+
+                print("Processed:", appointment)
+
+            elif command == "undo":
                 if undo_stack.is_empty():
                     print("Nothing to undo.")
                     continue
+
                 action, appointment = undo_stack.pop()
+
                 if action == "add":
-                    appointments.remove(appointment) #removes recent addition 
-                    redo_stack.push((action, appointment)) #adds the recent deletion to the redo stack
+                    appointments.dequeue_rear()
+
+                elif action == "process":
+                    appointments.enqueue_front(appointment)
+
+                redo_stack.push((action, appointment))
 
             elif command == "redo":
                 if redo_stack.is_empty():
-                    print("Nothing to redo.") #if empty
+                    print("Nothing to redo.")
                     continue
-                action, appointment = redo_stack.pop() #initialize tuple , "action , appointment"
+
+                action, appointment = redo_stack.pop()
+
                 if action == "add":
-                    appointments.append(appointment)
-                    undo_stack.push((action, appointment))
+                    appointments.enqueue(appointment)
+
+                elif action == "process":
+                    appointments.dequeue()
+
+                undo_stack.push((action, appointment))
 
             elif command == "show":
                 print(appointments)
 
             elif command == "quit":
                 break
+
             else:
                 print("Invalid command.")
+
 
     def pinventory():
         #implement tree for Keeping parts sorted by part number, Printing parts in order, Finding parts within a range, Finding the smallest or largest part number
@@ -574,9 +597,8 @@ if __name__ == '__main__':
 
 
 
-
-    pinventory()
     schedule()
+    pinventory()
     RepairProcess()
     pRepairs()
     current_log = repairWorkflow()

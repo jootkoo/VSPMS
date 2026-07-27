@@ -17,12 +17,13 @@ The main goals of this project are to:
 
 ## Current Core Features
 
-The first version of the application focuses on four main operations:
+Main operations:
 
-- Add a vehicle
-- Add a part
-- Create a service request
-- Process the next service request
+- Appointments :  Implemented using stacks and queue
+- Inventory : Implemented using hashmap and binary search tree
+- Service Log: Implemented using doubly linked list
+- Priority Repair : Implemented using max heap
+- Repair Process : Implemented using Graph
 
 Service requests are assigned urgency scores and placed into a priority queue so that the most urgent repair can be processed first.
 
@@ -36,8 +37,8 @@ The completed application may manage:
 - Parts inventory
 - Service requests
 - Technicians
-- Shop locations
 - Repair history
+- Repair time
 
 
 ```text
