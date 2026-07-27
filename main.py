@@ -2,7 +2,10 @@ from serviceLog import dLinkedList
 from priorityRepairs import maxHeap
 from repairProcess import Graph
 from appointments import Stack
-from partsInventory import BinarySearchTree
+from partsInventoryTree import BinarySearchTree
+from partsInventoryHash import HashMap
+
+
 
 class Vehicle:
     def __init__(self, vin, make, model, year):
@@ -503,47 +506,71 @@ if __name__ == '__main__':
                 print("Invalid command.")
 
     def pinventory():
-        inventory = BinarySearchTree()
+        #implement tree for Keeping parts sorted by part number, Printing parts in order, Finding parts within a range, Finding the smallest or largest part number
+        #Hashmap for Fast exact lookup by part number
+
+
+        inventoryB= BinarySearchTree()
+        inventoryH = HashMap(30000)
 
         while True:
-            command = input("add, delete, search, show : ").strip().lower()
+            command = input("add, delete, search, show, or quit: ").strip().lower()
 
-            if command == "add": #append appointment to stack
-                item = input("Enter item : ")
-                itemNum = int(input("Enter item num : "))
-                inventory.insert(itemNum, item)
+            if command == "add":
+                item = input("Enter item: ").strip()
+                item_num = int(input("Enter item number: "))
 
-            elif command == "delete": 
-                item = int(input("Enter item num to delete : "))
-                inventory.delete(item)
+                if item_num in inventoryH:
+                    print("That item number already exists.")
+                    continue
 
-            elif command == "search":
-                item = int(input("Enter item num to search : "))
-                print(inventory.search(item))
-                pass
+                # inserting into both structures, hashmap and tree
+                inventoryB.insert(item_num, item)
+                inventoryH.put(item_num, item)
+                print("Item added.")
+
+            elif command == "delete":
+                item_num = int(input("Enter item number to delete: "))
+                if item_num not in inventoryH:
+                    print("Item not found.")
+                    continue
+                inventoryB.delete(item_num) #deletes for both
+                inventoryH.remove(item_num)
+                print("Item deleted.")
+
+            elif command == "search": #use hashmap for fast search
+                item_num = int(input("Enter item number to search: "))
+                try:
+                    item = inventoryH.get(item_num)
+                    print(f"Item found: {item_num} - {item}")
+                except KeyError:
+                    print("Item not found.")
 
             elif command == "show":
-                print("ORDERS: showall, inorder, preoder, postorder")
-                order = str(input("Select order: "))
-                if order == 'inorder':
-                    for i in inventory.traverse('inorder'):
-                        print(i)
-                elif order == 'preorder':
-                    for i in inventory.traverse('preorder'):
-                        print(i)
-                elif order == 'postorder':
-                    for i in inventory.traverse('postorder'):
-                        print(i)
-                elif order == 'showall':
-                    print(inventory)
+                print("ORDERS: showall, inorder, preorder, postorder, hashmap")
+                order = input("Select order: ").strip().lower()
+                if order == "inorder":
+                    for item in inventoryB.traverse("inorder"):
+                        print(item)
+                elif order == "preorder":
+                    for item in inventoryB.traverse("preorder"):
+                        print(item)
+                elif order == "postorder":
+                    for item in inventoryB.traverse("postorder"):
+                        print(item)
+                elif order == "showall":
+                    print(inventoryB)
+                elif order == "hashmap":
+                    for key, value in inventoryH.items():
+                        print(f"{key}: {value}")
                 else:
-                    print("Invalid command.")
+                    print("Invalid order.")
 
             elif command == "quit":
                 break
+
             else:
                 print("Invalid command.")
-
 
 
 
