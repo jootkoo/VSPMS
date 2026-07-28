@@ -23,7 +23,7 @@ class QdrantStorage:
             self.client.upsert(self.collection, points=batch)
 
     def search(self, query_vector, top_k: int=5): #top_k means we're looking for 5 results from the vector database
-        results = self.client.query_points(
+        response = self.client.query_points(
             collection_name = self.collection,
             query=query_vector, 
             with_payload=True, 
@@ -31,8 +31,8 @@ class QdrantStorage:
         )
         contexts = []
         sources = []
-        for results in results.points:
-            payload = getattr(results, "payload", None) or {}
+        for result in response.points:
+            payload = getattr(result, "payload", None) or {}
             text = payload.get("text", "")
             source = payload.get("source", "")
             if text:
