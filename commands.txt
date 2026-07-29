@@ -18,3 +18,11 @@ git branch -M main
 
 # 7. Upload the project
 git push -u origin main
+
+
+
+uvicorn main:app --reload
+
+npx inngest-cli@latest dev -u http://127.0.0.1:8000/api/inngest --no-discovery
+
+streamlit run streamlit/home.py

@@ -12,6 +12,7 @@ load_dotenv()
 st.set_page_config(page_title="RAG Ingest PDF", page_icon="📄", layout="centered")
 
 #ingest client 
+#initialize server
 @st.cache_resource
 def get_inngest_client() -> inngest.Inngest:
     return inngest.Inngest(app_id="rag_app", is_production=False)
@@ -39,7 +40,7 @@ async def send_rag_ingest_event(pdf_path: Path) -> None:
     )
 
 
-st.title("Upload a PDF to Ingest")
+st.title("Upload a vehicle manual PDF")
 uploaded = st.file_uploader("Choose a PDF", type=["pdf"], accept_multiple_files=False)
 
 if uploaded is not None:
@@ -53,7 +54,7 @@ if uploaded is not None:
     st.caption("You can upload another PDF if you like.")
 
 st.divider()
-st.title("Ask a question about your PDFs")
+st.title("Ask a question specific to your vehicle")
 
 
 async def send_rag_query_event(question: str, top_k: int) -> None:

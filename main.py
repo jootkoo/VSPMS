@@ -1,611 +1,839 @@
-from serviceLog import dLinkedList
-from priorityRepairs import maxHeap
-from repairProcess import Graph
-from appointments import Stack
-from appointmentsQueue import Queue
-from partsInventoryTree import BinarySearchTree
-from partsInventoryHash import HashMap
+from pathlib import Path
+import shutil
+from threading import RLock
+
+import inngest
+import inngest.fast_api
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from data_structures.bst import BinarySearchTree #data structure imports
+from data_structures.graph import Graph
+from data_structures.hashmap import HashMap
+from data_structures.linkedList import dLinkedList
+from data_structures.maxHeap import maxHeap
+from data_structures.queue import Queue
+from data_structures.stack import Stack
+
+from rag_ai.ragAI import (
+    inngest_client,
+    query_manual,
+    rag_ingest_pdf,
+    rag_query_pdf_ai,
+)
 
 
+# -----------------------------------------------------------------------
+# Shared in-memory data-structure instances
+# -----------------------------------------------------------------------
 
-class Vehicle:
-    def __init__(self, vin, make, model, year):
-        self.vin = vin
-        self.make = make
-        self.model = model
-        self.year = year
+state_lock = RLock()
 
-if __name__ == '__main__':
-    repairWorkflowLog = dLinkedList()
+appointments = Queue()
+appointment_undo = Stack()
+appointment_redo = Stack()
 
-    vehicle1 = Vehicle(
-        "1FTFW1E50MFA12345",
-        "Ford",
-        "F-150",
-        2021
+parts_hashmap = HashMap(30000)
+parts_tree = BinarySearchTree()
+
+priority_repairs = maxHeap()
+repair_logs = dLinkedList()
+
+REPAIR_WORKFLOWS = {'fuel leak': [('Confirm fuel leak', 10), ('Shut vehicle off and isolate ignition sources', 2), ('Identify fuel type and leak location', 10), ('Relieve fuel-system pressure', 15), ('Inspect fuel lines, hoses, tank, rail, injectors, and seals', 10), ('Replace damaged component', 90), ('Reconnect fuel system', 20), ('Pressurize fuel system', 10), ('Check for additional leaks', 10), ('Clear related diagnostic codes', 5), ('Road test and recheck', 15)], 'complete brake failure': [('Do not drive vehicle', 2), ('Tow vehicle into service bay', 30), ('Inspect brake fluid level', 10), ('Check for external brake fluid leaks', 10), ('Inspect master cylinder', 10), ('Inspect brake lines and hoses', 10), ('Inspect calipers and wheel cylinders', 10), ('Inspect brake booster and pedal linkage', 10), ('Repair failed brake component', 90), ('Refill brake fluid', 5), ('Bleed brake system', 30), ('Verify brake pedal pressure', 10), ('Perform low-speed brake test', 10), ('Perform final leak inspection', 10)], 'engine overheating': [('Allow engine to cool', 30), ('Check coolant level', 10), ('Inspect for coolant leaks', 10), ('Pressure-test cooling system', 30), ('Inspect radiator', 10), ('Inspect cooling system hoses and reservoir', 10), ('Test radiator fan', 20), ('Test thermostat', 20), ('Test water pump', 20), ('Check radiator cap', 10), ('Check for combustion gases in coolant', 20), ('Repair failed cooling system component', 90), ('Refill and bleed cooling system', 30), ('Run engine to operating temperature', 15), ('Verify engine temperature stability', 10), ('Road test vehicle', 15)], 'tire sidewall bulge': [('Do not drive vehicle at high speed', 2), ('Inspect damaged tire', 10), ('Confirm tire sidewall damage', 10), ('Inspect wheel for impact damage', 10), ('Remove wheel', 8), ('Remove damaged tire', 10), ('Inspect valve stem or TPMS sensor', 10), ('Mount replacement tire', 15), ('Balance wheel', 10), ('Reinstall wheel', 8), ('Torque lug nuts', 5), ('Set tire pressure', 5), ('Verify TPMS operation', 10)], 'flashing check engine light': [('Reduce engine load and stop driving if engine is shaking', 2), ('Scan diagnostic trouble codes', 10), ('Record freeze-frame data', 5), ('Inspect for active engine misfire', 10), ('Inspect ignition coils', 10), ('Inspect spark plugs', 10), ('Inspect fuel injectors', 10), ('Check fuel pressure', 10), ('Check engine compression if required', 45), ('Repair cause of engine misfire', 60), ('Clear diagnostic trouble codes', 5), ('Run misfire monitor', 10), ('Road test vehicle', 15), ('Rescan for diagnostic trouble codes', 10)], 'brake pad replacement': [('Inspect brake system', 10), ('Measure brake pad thickness', 10), ('Measure brake rotor condition', 10), ('Lift vehicle', 10), ('Remove wheel', 8), ('Remove brake caliper', 15), ('Remove old brake pads', 10), ('Inspect caliper and slide pins', 10), ('Service caliper slide pins', 10), ('Retract caliper piston', 10), ('Replace or machine brake rotor if required', 45), ('Install new brake pads', 10), ('Reinstall brake caliper', 15), ('Reinstall wheel', 8), ('Torque lug nuts', 5), ('Pump brake pedal', 3), ('Check brake fluid level', 10), ('Bed in brake pads', 20), ('Road test brakes', 15)], 'transmission slipping': [('Confirm transmission slipping symptom', 10), ('Scan engine and transmission codes', 10), ('Check transmission fluid level', 10), ('Inspect transmission fluid condition', 10), ('Check transmission for leaks', 10), ('Inspect shift linkage and electronic controls', 10), ('Review live transmission data', 20), ('Perform transmission pressure tests if required', 30), ('Inspect transmission solenoids and valve body', 10), ('Determine internal or external transmission fault', 30), ('Repair or replace failed transmission component', 240), ('Refill correct transmission fluid', 20), ('Perform transmission adaptation or relearn', 30), ('Road test vehicle', 15), ('Recheck transmission fluid and codes', 10)], 'steady check engine light': [('Scan diagnostic trouble codes', 10), ('Record freeze-frame data', 5), ('Inspect wiring, connectors, and vacuum lines', 10), ('Test system identified by diagnostic code', 30), ('Determine whether fault is current or intermittent', 15), ('Repair root cause', 60), ('Clear diagnostic trouble codes', 5), ('Complete required drive cycle', 30), ('Verify emissions monitors', 10), ('Rescan for diagnostic trouble codes', 10)], 'wheel alignment': [('Check tire pressure', 10), ('Inspect tire wear', 10), ('Inspect wheel condition', 10), ('Inspect steering components', 10), ('Inspect suspension components', 10), ('Check vehicle ride height', 10), ('Replace worn steering or suspension components if required', 120), ('Mount alignment sensors', 15), ('Measure caster, camber, and toe', 15), ('Adjust rear alignment if applicable', 20), ('Adjust front alignment', 20), ('Center steering wheel', 10), ('Record final alignment measurements', 10), ('Road test vehicle', 15)], 'oil change': [('Confirm engine oil specification and capacity', 10), ('Warm engine slightly', 5), ('Lift or secure vehicle', 10), ('Remove oil drain plug', 5), ('Drain old engine oil', 10), ('Replace drain plug washer if required', 10), ('Reinstall and torque drain plug', 5), ('Remove old oil filter', 5), ('Install new oil filter', 5), ('Add new engine oil', 5), ('Start engine', 2), ('Verify oil pressure warning turns off', 10), ('Check for oil leaks', 10), ('Shut engine off', 2), ('Recheck engine oil level', 10), ('Reset maintenance reminder', 3)], 'tire rotation': [('Inspect tires', 10), ('Check tire tread depth', 10), ('Check tire pressure', 10), ('Determine correct tire rotation pattern', 10), ('Lift vehicle', 10), ('Remove wheels', 15), ('Move wheels to assigned positions', 10), ('Inspect brakes while wheels are removed', 10), ('Reinstall wheels', 15), ('Torque lug nuts', 5), ('Adjust tire pressures', 5), ('Reset or relearn TPMS if required', 15), ('Road test vehicle', 15)], 'air filter replacement': [('Identify correct engine air filter', 10), ('Open air filter housing', 5), ('Remove old air filter', 5), ('Inspect air filter housing and intake duct', 10), ('Clean loose debris from housing', 5), ('Install new air filter in correct orientation', 5), ('Close and secure air filter housing', 5), ('Inspect intake connections', 10), ('Start engine', 2), ('Verify normal engine operation', 10)], 'ac repair': [('Confirm air conditioning complaint', 10), ('Inspect drive belt and compressor operation', 10), ('Check blower motor operation', 10), ('Scan HVAC control module if applicable', 10), ('Measure vent temperature', 10), ('Check refrigerant system pressures', 15), ('Leak-test air conditioning system', 25), ('Recover refrigerant using approved equipment', 30), ('Repair leaking or failed component', 120), ('Replace receiver-drier or accumulator if required', 60), ('Evacuate air conditioning system', 30), ('Verify system vacuum holds', 15), ('Recharge correct amount of refrigerant', 20), ('Add correct compressor oil if required', 10), ('Test vent temperature and system pressures', 20), ('Perform final refrigerant leak check', 10)], 'cosmetic': [('Inspect and photograph cosmetic damage', 10), ('Identify affected panels and trim', 10), ('Estimate required labor and materials', 20), ('Remove damaged trim or panel if required', 30), ('Repair dents, scratches, or cracks', 90), ('Sand damaged area', 30), ('Apply body filler if required', 30), ('Sand and shape repaired area', 30), ('Apply primer', 25), ('Match paint color', 20), ('Apply base coat', 30), ('Apply clear coat', 30), ('Cure paint', 120), ('Polish and blend repaired area', 45), ('Reinstall trim or panels', 30), ('Perform final quality inspection', 10)]}
+repair_graph = Graph(directed=True)
+
+
+def build_repair_graph():
+    for service_name, procedures in REPAIR_WORKFLOWS.items():
+        for index in range(len(procedures) - 1):
+            current_step, _ = procedures[index]
+            next_step, next_minutes = procedures[index + 1]
+
+            repair_graph.add_edge(
+                f"{service_name}: {current_step}",
+                f"{service_name}: {next_step}",
+                next_minutes,
+            )
+
+
+build_repair_graph()
+
+
+# -----------------------------------------------------------------------
+# Request models
+# -----------------------------------------------------------------------
+
+class AppointmentRequest(BaseModel):
+    appointment: str
+
+
+class PartRequest(BaseModel):
+    item_num: int
+    item: str
+
+
+class PriorityRepairRequest(BaseModel):
+    name: str
+    vehicle: str
+    service: str
+    is_drivable: bool
+    is_activeleak: bool
+
+
+class RepairLogRequest(BaseModel):
+    month: int
+    day: int
+    year: int
+    repair: str
+
+
+class InsertRepairLogRequest(RepairLogRequest):
+    index: int
+
+
+class RAGQueryRequest(BaseModel):
+    question: str
+    top_k: int = Field(
+        default=5,
+        ge=1,
+        le=20,
     )
 
-    def repairWorkflow():
-        log = []
-        print("REPAIR WORKFLOW")
-        month = int(input("Enter month :"))
-        if (month > 12) or (month < 1):
-            month = int(input("Invalid input, Please input valid month :"))
-        log.append(month)
-        day = int(input("Enter day :"))
-        if (day > 31) or (day< 1):
-            day = int(input("Invalid input, Please input valid day :"))
-        log.append(day)
-        year = int(input("Enter year :"))
-        if (year < 1):
-            year = int(input("Invalid input, Please input valid year :"))
-        log.append(year)
-        repair = str(input("Enter in repair to be logged :"))
-        log.append(repair)
-        return log
 
-    def pRepairs():
-        SERVICE_URGENCY = {
-            "fuel leak": 100,
-            "complete brake failure": 99,
-            "engine overheating": 98,
-            "tire sidewall_bulge": 97,
-            "flashing check engine light": 95,
-            "brake pad replacement": 75,
-            "transmission slipping": 88,
-            "steady check engine light": 65,
-            "wheel alignment": 45,
-            "oil change": 35,
-            "tire rotation": 30,
-            "air filter replacement": 25,
-            "ac repair": 25,
-            "cosmetic": 5,
+SERVICE_URGENCY = {
+    "fuel leak": 100,
+    "complete brake failure": 99,
+    "engine overheating": 98,
+    "tire sidewall bulge": 97,
+    "flashing check engine light": 95,
+    "transmission slipping": 88,
+    "brake pad replacement": 75,
+    "steady check engine light": 65,
+    "wheel alignment": 45,
+    "oil change": 35,
+    "tire rotation": 30,
+    "air filter replacement": 25,
+    "ac repair": 25,
+    "cosmetic": 5,
+}
+
+
+# -----------------------------------------------------------------------
+# App setup
+# -----------------------------------------------------------------------
+
+app = FastAPI(
+    title="VSPMS API",
+    description=(
+        "Vehicle service, parts inventory, repair workflows, "
+        "and vehicle-manual RAG"
+    ),
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8501",
+        "http://127.0.0.1:8501",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/health", tags=["System"])
+def health():
+    return {
+        "status": "running",
+        "service": "VSPMS API",
+    }
+
+
+@app.get("/api/dashboard", tags=["System"])
+def dashboard():
+    with state_lock:
+        return {
+            "appointments": len(appointments),
+            "parts": len(parts_hashmap),
+            "priority_repairs": len(priority_repairs),
+            "repair_logs": len(repair_logs),
         }
 
-        priority = 0
-        queue = maxHeap()
 
-        #UI
-        print("SERVICE LOG")
-        name = str(input("Enter in name :"))
-        vehicle = str(input("Enter vehicle :"))
-        print("SERVICES:")
-        for key in SERVICE_URGENCY:
-            print(key)
-        #Service
-        while True:
-            service = input("Enter service: ").strip().lower()
-            if service in SERVICE_URGENCY:
-                break
-            print("Service not found. Please choose from the list.")
-        priority += SERVICE_URGENCY[service]
-        #Drivability
-        while True:
-            drivable = input("Is the vehicle drivable? (yes/no): ").strip().lower()
-            if drivable == "yes":
-                is_drivable = True
-                break
-            elif drivable == "no":
-                is_drivable = False
-                priority += 25
-                break
-            else:
-                print("Please enter yes or no.")
-        #Active Leak
-        while True:
-            activeleak = input("Does this vehicle have an active leak? (yes/no): ").strip().lower()
-            if activeleak == "yes":
-                is_activeleak = True
-                priority += 25
-                break
-            elif activeleak == "no":
-                is_activeleak = False
-                break
-            else:
-                print("Please enter yes or no.")
+# -----------------------------------------------------------------------
+# Appointments: Queue + Stacks
+# -----------------------------------------------------------------------
+
+def appointment_snapshot():
+    return {
+        "appointments": appointments.to_list(),
+        "queue_size": len(appointments),
+        "undo_count": len(appointment_undo),
+        "redo_count": len(appointment_redo),
+    }
 
 
-        requests = {
-            "name": name,
-            "service": service,
-            "is_drivable": is_drivable,
-            "is_activeleak": is_activeleak
-        }
-        
-        queue.insert(priority, requests)
+@app.get("/api/appointments", tags=["Appointments"])
+def show_appointments():
+    with state_lock:
+        return appointment_snapshot()
 
-        print(queue)
-         
-    def RepairProcess():
-        
 
-        repair_workflows = {
-            "fuel leak": [
-                ("Confirm fuel leak", 10),
-                ("Shut vehicle off and isolate ignition sources", 2),
-                ("Identify fuel type and leak location", 10),
-                ("Relieve fuel-system pressure", 15),
-                ("Inspect fuel lines, hoses, tank, rail, injectors, and seals", 10),
-                ("Replace damaged component", 90),
-                ("Reconnect fuel system", 20),
-                ("Pressurize fuel system", 10),
-                ("Check for additional leaks", 10),
-                ("Clear related diagnostic codes", 5),
-                ("Road test and recheck", 15),
-            ],
+@app.post("/api/appointments/add", tags=["Appointments"])
+def add_appointment(payload: AppointmentRequest):
+    clean_appointment = payload.appointment.strip()
 
-            "complete brake failure": [
-                ("Do not drive vehicle", 2),
-                ("Tow vehicle into service bay", 30),
-                ("Inspect brake fluid level", 10),
-                ("Check for external brake fluid leaks", 10),
-                ("Inspect master cylinder", 10),
-                ("Inspect brake lines and hoses", 10),
-                ("Inspect calipers and wheel cylinders", 10),
-                ("Inspect brake booster and pedal linkage", 10),
-                ("Repair failed brake component", 90),
-                ("Refill brake fluid", 5),
-                ("Bleed brake system", 30),
-                ("Verify brake pedal pressure", 10),
-                ("Perform low-speed brake test", 10),
-                ("Perform final leak inspection", 10),
-            ],
+    if not clean_appointment:
+        raise HTTPException(
+            status_code=400,
+            detail="Appointment is required",
+        )
 
-            "engine overheating": [
-                ("Allow engine to cool", 30),
-                ("Check coolant level", 10),
-                ("Inspect for coolant leaks", 10),
-                ("Pressure-test cooling system", 30),
-                ("Inspect radiator", 10),
-                ("Inspect cooling system hoses and reservoir", 10),
-                ("Test radiator fan", 20),
-                ("Test thermostat", 20),
-                ("Test water pump", 20),
-                ("Check radiator cap", 10),
-                ("Check for combustion gases in coolant", 20),
-                ("Repair failed cooling system component", 90),
-                ("Refill and bleed cooling system", 30),
-                ("Run engine to operating temperature", 15),
-                ("Verify engine temperature stability", 10),
-                ("Road test vehicle", 15),
-            ],
+    with state_lock:
+        appointments.enqueue(clean_appointment)
+        appointment_undo.push(
+            ("add", clean_appointment)
+        )
+        appointment_redo.clear()
+        return appointment_snapshot()
 
-            "tire sidewall bulge": [
-                ("Do not drive vehicle at high speed", 2),
-                ("Inspect damaged tire", 10),
-                ("Confirm tire sidewall damage", 10),
-                ("Inspect wheel for impact damage", 10),
-                ("Remove wheel", 8),
-                ("Remove damaged tire", 10),
-                ("Inspect valve stem or TPMS sensor", 10),
-                ("Mount replacement tire", 15),
-                ("Balance wheel", 10),
-                ("Reinstall wheel", 8),
-                ("Torque lug nuts", 5),
-                ("Set tire pressure", 5),
-                ("Verify TPMS operation", 10),
-            ],
 
-            "flashing check engine light": [
-                ("Reduce engine load and stop driving if engine is shaking", 2),
-                ("Scan diagnostic trouble codes", 10),
-                ("Record freeze-frame data", 5),
-                ("Inspect for active engine misfire", 10),
-                ("Inspect ignition coils", 10),
-                ("Inspect spark plugs", 10),
-                ("Inspect fuel injectors", 10),
-                ("Check fuel pressure", 10),
-                ("Check engine compression if required", 45),
-                ("Repair cause of engine misfire", 60),
-                ("Clear diagnostic trouble codes", 5),
-                ("Run misfire monitor", 10),
-                ("Road test vehicle", 15),
-                ("Rescan for diagnostic trouble codes", 10),
-            ],
+@app.post("/api/appointments/process", tags=["Appointments"])
+def process_appointment():
+    with state_lock:
+        if appointments.is_empty():
+            raise HTTPException(
+                status_code=400,
+                detail="No appointments to process",
+            )
 
-            "brake pad replacement": [
-                ("Inspect brake system", 10),
-                ("Measure brake pad thickness", 10),
-                ("Measure brake rotor condition", 10),
-                ("Lift vehicle", 10),
-                ("Remove wheel", 8),
-                ("Remove brake caliper", 15),
-                ("Remove old brake pads", 10),
-                ("Inspect caliper and slide pins", 10),
-                ("Service caliper slide pins", 10),
-                ("Retract caliper piston", 10),
-                ("Replace or machine brake rotor if required", 45),
-                ("Install new brake pads", 10),
-                ("Reinstall brake caliper", 15),
-                ("Reinstall wheel", 8),
-                ("Torque lug nuts", 5),
-                ("Pump brake pedal", 3),
-                ("Check brake fluid level", 10),
-                ("Bed in brake pads", 20),
-                ("Road test brakes", 15),
-            ],
+        appointment = appointments.dequeue()
+        appointment_undo.push(
+            ("process", appointment)
+        )
+        appointment_redo.clear()
 
-            "transmission slipping": [
-                ("Confirm transmission slipping symptom", 10),
-                ("Scan engine and transmission codes", 10),
-                ("Check transmission fluid level", 10),
-                ("Inspect transmission fluid condition", 10),
-                ("Check transmission for leaks", 10),
-                ("Inspect shift linkage and electronic controls", 10),
-                ("Review live transmission data", 20),
-                ("Perform transmission pressure tests if required", 30),
-                ("Inspect transmission solenoids and valve body", 10),
-                ("Determine internal or external transmission fault", 30),
-                ("Repair or replace failed transmission component", 240),
-                ("Refill correct transmission fluid", 20),
-                ("Perform transmission adaptation or relearn", 30),
-                ("Road test vehicle", 15),
-                ("Recheck transmission fluid and codes", 10),
-            ],
+        result = appointment_snapshot()
+        result["processed"] = appointment
+        return result
 
-            "steady check engine light": [
-                ("Scan diagnostic trouble codes", 10),
-                ("Record freeze-frame data", 5),
-                ("Inspect wiring, connectors, and vacuum lines", 10),
-                ("Test system identified by diagnostic code", 30),
-                ("Determine whether fault is current or intermittent", 15),
-                ("Repair root cause", 60),
-                ("Clear diagnostic trouble codes", 5),
-                ("Complete required drive cycle", 30),
-                ("Verify emissions monitors", 10),
-                ("Rescan for diagnostic trouble codes", 10),
-            ],
 
-            "wheel alignment": [
-                ("Check tire pressure", 10),
-                ("Inspect tire wear", 10),
-                ("Inspect wheel condition", 10),
-                ("Inspect steering components", 10),
-                ("Inspect suspension components", 10),
-                ("Check vehicle ride height", 10),
-                ("Replace worn steering or suspension components if required", 120),
-                ("Mount alignment sensors", 15),
-                ("Measure caster, camber, and toe", 15),
-                ("Adjust rear alignment if applicable", 20),
-                ("Adjust front alignment", 20),
-                ("Center steering wheel", 10),
-                ("Record final alignment measurements", 10),
-                ("Road test vehicle", 15),
-            ],
+@app.post("/api/appointments/undo", tags=["Appointments"])
+def undo_appointment():
+    with state_lock:
+        if appointment_undo.is_empty():
+            raise HTTPException(
+                status_code=400,
+                detail="Nothing to undo",
+            )
 
-            "oil change": [
-                ("Confirm engine oil specification and capacity", 10),
-                ("Warm engine slightly", 5),
-                ("Lift or secure vehicle", 10),
-                ("Remove oil drain plug", 5),
-                ("Drain old engine oil", 10),
-                ("Replace drain plug washer if required", 10),
-                ("Reinstall and torque drain plug", 5),
-                ("Remove old oil filter", 5),
-                ("Install new oil filter", 5),
-                ("Add new engine oil", 5),
-                ("Start engine", 2),
-                ("Verify oil pressure warning turns off", 10),
-                ("Check for oil leaks", 10),
-                ("Shut engine off", 2),
-                ("Recheck engine oil level", 10),
-                ("Reset maintenance reminder", 3),
-            ],
+        action, appointment = appointment_undo.pop()
 
-            "tire rotation": [
-                ("Inspect tires", 10),
-                ("Check tire tread depth", 10),
-                ("Check tire pressure", 10),
-                ("Determine correct tire rotation pattern", 10),
-                ("Lift vehicle", 10),
-                ("Remove wheels", 15),
-                ("Move wheels to assigned positions", 10),
-                ("Inspect brakes while wheels are removed", 10),
-                ("Reinstall wheels", 15),
-                ("Torque lug nuts", 5),
-                ("Adjust tire pressures", 5),
-                ("Reset or relearn TPMS if required", 15),
-                ("Road test vehicle", 15),
-            ],
+        if action == "add":
+            appointments.dequeue_rear()
+        elif action == "process":
+            appointments.enqueue_front(appointment)
 
-            "air filter replacement": [
-                ("Identify correct engine air filter", 10),
-                ("Open air filter housing", 5),
-                ("Remove old air filter", 5),
-                ("Inspect air filter housing and intake duct", 10),
-                ("Clean loose debris from housing", 5),
-                ("Install new air filter in correct orientation", 5),
-                ("Close and secure air filter housing", 5),
-                ("Inspect intake connections", 10),
-                ("Start engine", 2),
-                ("Verify normal engine operation", 10),
-            ],
+        appointment_redo.push(
+            (action, appointment)
+        )
+        return appointment_snapshot()
 
-            "ac repair": [
-                ("Confirm air conditioning complaint", 10),
-                ("Inspect drive belt and compressor operation", 10),
-                ("Check blower motor operation", 10),
-                ("Scan HVAC control module if applicable", 10),
-                ("Measure vent temperature", 10),
-                ("Check refrigerant system pressures", 15),
-                ("Leak-test air conditioning system", 25),
-                ("Recover refrigerant using approved equipment", 30),
-                ("Repair leaking or failed component", 120),
-                ("Replace receiver-drier or accumulator if required", 60),
-                ("Evacuate air conditioning system", 30),
-                ("Verify system vacuum holds", 15),
-                ("Recharge correct amount of refrigerant", 20),
-                ("Add correct compressor oil if required", 10),
-                ("Test vent temperature and system pressures", 20),
-                ("Perform final refrigerant leak check", 10),
-            ],
 
-            "cosmetic": [
-                ("Inspect and photograph cosmetic damage", 10),
-                ("Identify affected panels and trim", 10),
-                ("Estimate required labor and materials", 20),
-                ("Remove damaged trim or panel if required", 30),
-                ("Repair dents, scratches, or cracks", 90),
-                ("Sand damaged area", 30),
-                ("Apply body filler if required", 30),
-                ("Sand and shape repaired area", 30),
-                ("Apply primer", 25),
-                ("Match paint color", 20),
-                ("Apply base coat", 30),
-                ("Apply clear coat", 30),
-                ("Cure paint", 120),
-                ("Polish and blend repaired area", 45),
-                ("Reinstall trim or panels", 30),
-                ("Perform final quality inspection", 10),
-            ],
-        }
+@app.post("/api/appointments/redo", tags=["Appointments"])
+def redo_appointment():
+    with state_lock:
+        if appointment_redo.is_empty():
+            raise HTTPException(
+                status_code=400,
+                detail="Nothing to redo",
+            )
 
-        def add_workflow_to_graph(graph, service_name):
-            procedures = repair_workflows[service_name]
+        action, appointment = appointment_redo.pop()
 
-            for index in range(len(procedures) - 1):
-                current_step, current_time = procedures[index]
-                next_step, next_time = procedures[index + 1]
-
-                current_node = f"{service_name}: {current_step}"
-                next_node = f"{service_name}: {next_step}"
-
-                graph.add_edge(
-                    current_node,
-                    next_node,
-                    next_time
+        if action == "add":
+            appointments.enqueue(appointment)
+        elif action == "process":
+            if appointments.is_empty():
+                raise HTTPException(
+                    status_code=400,
+                    detail="No appointment is available to process",
                 )
+            appointments.dequeue()
 
-        def add_all_workflows_to_graph(graph):
-            for service_name in repair_workflows:
-                add_workflow_to_graph(graph, service_name)
-
-
-        #####################
-        SERVICES = [
-            "fuel leak",
-            "complete brake failure",
-            "engine overheating",
-            "tire sidewall bulge",
-            "flashing check engine light",
-            "brake pad replacement",
-            "transmission slipping",
-            "steady check engine light",
-            "wheel alignment",
-            "oil change",
-            "tire rotation",
-            "air filter replacement",
-            "ac repair",
-            "cosmetic",
-        ]
-        #declare graph
-        g = Graph(directed=True)
-        add_all_workflows_to_graph(g)
-        print(g)
-
-        for service in SERVICES:
-            print(service)
-        while True:
-            service_name = str(input("Enter in service :"))
-            if service_name in SERVICES:
-                break
-            else:
-                print("Service does not exist, please RE-Enter in service")
-            
-
-        #starts at 0
-        current_index = 0
-        #looks through dict and grab the service the user chose
-        procedures = repair_workflows[service_name]
-
-        def timeToComplete():
-            current_index = 0
-            step, minutes = procedures[current_index]
-            time = 0
-
-            while current_index < len(procedures):
-                time += minutes
-                current_index += 1
-            print("Total Service Time: ")
-            print(f"{time//60} hours and {time % 60} minutes")
+        appointment_undo.push(
+            (action, appointment)
+        )
+        return appointment_snapshot()
 
 
-        timeToComplete()
+# -----------------------------------------------------------------------
+# Parts inventory: HashMap + BinarySearchTree
+# -----------------------------------------------------------------------
 
-        def print_current_step():
-            step, minutes = procedures[current_index] #grabs the two perameters in the procedure
-        
-            print(f"Step {current_index + 1}: {step}")
-            print(f"Estimated time: {minutes} minutes")
+@app.post("/api/parts", tags=["Parts Inventory"])
+def add_part(payload: PartRequest):
+    clean_item = payload.item.strip()
 
-        #while loop to loop through procedures
-        while current_index < len(procedures):
-            step, minutes = procedures[current_index] #grabs the two perameters in the procedure
+    if not clean_item:
+        raise HTTPException(
+            status_code=400,
+            detail="Part name is required",
+        )
 
-            print(f"\nStep {current_index + 1}: {step}")
-            print(f"Estimated time: {minutes} minutes")
+    with state_lock:
+        #Use the HashMap to check whether the exact part number exists
+        if payload.item_num in parts_hashmap:
+            raise HTTPException(
+                status_code=400,
+                detail="That part number already exists",
+            )
 
-            user_input = input(
-                "Enter 'next' when complete or 'quit' to stop: ").strip().lower()
+        #Store the same part in both structures
+        #HashMap is used for exact lookup
+        parts_hashmap.put(
+            payload.item_num,
+            clean_item,
+        )
 
-            if user_input == "next":
-                current_index += 1
+        #BinarySearchTree is used for ordered traversal
+        parts_tree.insert(
+            payload.item_num,
+            clean_item,
+        )
 
-            elif user_input == "quit":
-                print("Workflow stopped.")
-                break
+        return {
+            "item_num": payload.item_num,
+            "item": clean_item,
+        }
 
-            else:
-                print("Invalid input. Enter 'next' or 'quit'.")
+
+@app.get("/api/parts", tags=["Parts Inventory"])
+def show_parts(
+    order: str = Query(default="inorder")
+):
+    normalized = order.strip().lower()
+
+    with state_lock:
+        #Display the HashMap entries
+        if normalized == "hashmap":
+            items = parts_hashmap.items()
+
+        #Use the existing BST traverse method
+        elif normalized in {
+            "inorder",
+            "preorder",
+            "postorder",
+        }:
+            items = list(
+                parts_tree.traverse(normalized)
+            )
+
+        #The BST __iter__ method already performs inorder traversal
+        elif normalized == "showall":
+            items = list(parts_tree)
 
         else:
-            print(f"\n{service_name.title()} workflow is complete.")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid display order",
+            )
 
-        print(g.bfs("fuel leak"))
-        
-    def schedule():
-        appointments = Queue()
-        undo_stack = Stack()
-        redo_stack = Stack()
-
-        while True:
-            command = input("add, process, undo, redo, show, or quit: ").strip().lower()
-
-            if command == "add":
-                appointment = input("Enter appointment: ").strip()
-                appointments.enqueue(appointment)
-                undo_stack.push(("add", appointment))
-                redo_stack = Stack()
-
-            elif command == "process":
-                if appointments.is_empty():
-                    print("No appointments to process.")
-                    continue
-
-                appointment = appointments.dequeue()
-                undo_stack.push(("process", appointment))
-                redo_stack = Stack()
-
-                print("Processed:", appointment)
-
-            elif command == "undo":
-                if undo_stack.is_empty():
-                    print("Nothing to undo.")
-                    continue
-
-                action, appointment = undo_stack.pop()
-
-                if action == "add":
-                    appointments.dequeue_rear()
-
-                elif action == "process":
-                    appointments.enqueue_front(appointment)
-
-                redo_stack.push((action, appointment))
-
-            elif command == "redo":
-                if redo_stack.is_empty():
-                    print("Nothing to redo.")
-                    continue
-
-                action, appointment = redo_stack.pop()
-
-                if action == "add":
-                    appointments.enqueue(appointment)
-
-                elif action == "process":
-                    appointments.dequeue()
-
-                undo_stack.push((action, appointment))
-
-            elif command == "show":
-                print(appointments)
-
-            elif command == "quit":
-                break
-
-            else:
-                print("Invalid command.")
+        return {
+            "order": normalized,
+            "items": [
+                {
+                    "item_num": key,
+                    "item": value,
+                }
+                for key, value in items
+            ],
+            "count": len(parts_hashmap),
+        }
 
 
-    def pinventory():
-        #implement tree for Keeping parts sorted by part number, Printing parts in order, Finding parts within a range, Finding the smallest or largest part number
-        #Hashmap for Fast exact lookup by part number
+@app.get(
+    "/api/parts/range/{minimum_item_num}/{maximum_item_num}",
+    tags=["Parts Inventory"],
+)
+def parts_in_range(
+    minimum_item_num: int,
+    maximum_item_num: int,
+):
+    if minimum_item_num > maximum_item_num:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Minimum part number cannot be greater "
+                "than maximum part number"
+            ),
+        )
+
+    with state_lock:
+        #The existing BST does not have a range_search method.
+        #Use its existing inorder traversal, then filter the sorted results.
+        sorted_parts = list(
+            parts_tree.traverse("inorder")
+        )
+
+        matching_parts = [
+            {
+                "item_num": key,
+                "item": value,
+            }
+            for key, value in sorted_parts
+            if minimum_item_num <= key <= maximum_item_num
+        ]
+
+        return {
+            "minimum": minimum_item_num,
+            "maximum": maximum_item_num,
+            "items": matching_parts,
+            "count": len(matching_parts),
+        }
 
 
-        inventoryB= BinarySearchTree()
-        inventoryH = HashMap(30000)
+@app.get(
+    "/api/parts/{item_num}",
+    tags=["Parts Inventory"],
+)
+def search_part(item_num: int):
+    with state_lock:
+        #Use the HashMap for fast exact lookup by part number
+        try:
+            item = parts_hashmap.get(item_num)
 
-        while True:
-            command = input("add, delete, search, show, or quit: ").strip().lower()
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="Part not found",
+            ) from exc
 
-            if command == "add":
-                item = input("Enter item: ").strip()
-                item_num = int(input("Enter item number: "))
-
-                if item_num in inventoryH:
-                    print("That item number already exists.")
-                    continue
-
-                # inserting into both structures, hashmap and tree
-                inventoryB.insert(item_num, item)
-                inventoryH.put(item_num, item)
-                print("Item added.")
-
-            elif command == "delete":
-                item_num = int(input("Enter item number to delete: "))
-                if item_num not in inventoryH:
-                    print("Item not found.")
-                    continue
-                inventoryB.delete(item_num) #deletes for both
-                inventoryH.remove(item_num)
-                print("Item deleted.")
-
-            elif command == "search": #use hashmap for fast search
-                item_num = int(input("Enter item number to search: "))
-                try:
-                    item = inventoryH.get(item_num)
-                    print(f"Item found: {item_num} - {item}")
-                except KeyError:
-                    print("Item not found.")
-
-            elif command == "show":
-                print("ORDERS: showall, inorder, preorder, postorder, hashmap")
-                order = input("Select order: ").strip().lower()
-                if order == "inorder":
-                    for item in inventoryB.traverse("inorder"):
-                        print(item)
-                elif order == "preorder":
-                    for item in inventoryB.traverse("preorder"):
-                        print(item)
-                elif order == "postorder":
-                    for item in inventoryB.traverse("postorder"):
-                        print(item)
-                elif order == "showall":
-                    print(inventoryB)
-                elif order == "hashmap":
-                    for key, value in inventoryH.items():
-                        print(f"{key}: {value}")
-                else:
-                    print("Invalid order.")
-
-            elif command == "quit":
-                break
-
-            else:
-                print("Invalid command.")
+        return {
+            "item_num": item_num,
+            "item": item,
+        }
 
 
+@app.delete(
+    "/api/parts/{item_num}",
+    tags=["Parts Inventory"],
+)
+def delete_part(item_num: int):
+    with state_lock:
+        if item_num not in parts_hashmap:
+            raise HTTPException(
+                status_code=404,
+                detail="Part not found",
+            )
 
-    schedule()
-    pinventory()
-    RepairProcess()
-    pRepairs()
-    current_log = repairWorkflow()
-    repairWorkflowLog.append(current_log)
+        item = parts_hashmap.get(item_num)
 
-    print(repairWorkflowLog)
+        #Remove the same part from both structures
+        parts_hashmap.remove(item_num)
+        parts_tree.delete(item_num)
+
+        return {
+            "item_num": item_num,
+            "item": item,
+        }
 
 
+# -----------------------------------------------------------------------
+# Priority repairs: MaxHeap
+# -----------------------------------------------------------------------
 
-    print(vehicle1.model)
+@app.get(
+    "/api/priority-repairs/services",
+    tags=["Priority Repairs"],
+)
+def priority_services():
+    return {
+        "services": list(SERVICE_URGENCY)
+    }
+
+
+@app.get(
+    "/api/priority-repairs",
+    tags=["Priority Repairs"],
+)
+def show_priority_repairs():
+    with state_lock:
+        return {
+            "repairs": [
+                {
+                    "priority": priority,
+                    **request,
+                }
+                for priority, request
+                in priority_repairs.to_list()
+            ]
+        }
+
+
+@app.post(
+    "/api/priority-repairs",
+    tags=["Priority Repairs"],
+)
+def add_priority_repair(
+    payload: PriorityRepairRequest
+):
+    name = payload.name.strip()
+    vehicle = payload.vehicle.strip()
+    service = (
+        payload.service
+        .strip()
+        .lower()
+        .replace("_", " ")
+    )
+
+    if not name:
+        raise HTTPException(
+            status_code=400,
+            detail="Customer name is required",
+        )
+
+    if not vehicle:
+        raise HTTPException(
+            status_code=400,
+            detail="Vehicle is required",
+        )
+
+    if service not in SERVICE_URGENCY:
+        raise HTTPException(
+            status_code=400,
+            detail="Service not found",
+        )
+
+    priority = SERVICE_URGENCY[service]
+
+    if not payload.is_drivable:
+        priority += 25
+
+    if payload.is_activeleak:
+        priority += 25
+
+    request = {
+        "name": name,
+        "vehicle": vehicle,
+        "service": service,
+        "is_drivable": payload.is_drivable,
+        "is_activeleak": payload.is_activeleak,
+    }
+
+    with state_lock:
+        priority_repairs.insert(
+            priority,
+            request,
+        )
+
+    return {
+        "priority": priority,
+        **request,
+    }
+
+
+@app.get(
+    "/api/priority-repairs/next",
+    tags=["Priority Repairs"],
+)
+def peek_priority_repair():
+    with state_lock:
+        try:
+            priority, request = (
+                priority_repairs.peek_max()
+            )
+        except IndexError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=str(exc),
+            ) from exc
+
+        return {
+            "priority": priority,
+            **request,
+        }
+
+
+@app.post(
+    "/api/priority-repairs/process",
+    tags=["Priority Repairs"],
+)
+def process_priority_repair():
+    with state_lock:
+        try:
+            priority, request = (
+                priority_repairs.extract_max()
+            )
+        except IndexError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=str(exc),
+            ) from exc
+
+        return {
+            "priority": priority,
+            **request,
+        }
+
+
+# -----------------------------------------------------------------------
+# Repair logs: Doubly linked list
+# -----------------------------------------------------------------------
+
+def validate_repair_log(
+    month,
+    day,
+    year,
+    repair,
+):
+    import datetime
+
+    try:
+        repair_date = datetime.date(
+            year,
+            month,
+            day,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid repair date: {exc}",
+        ) from exc
+
+    clean_repair = repair.strip()
+
+    if not clean_repair:
+        raise HTTPException(
+            status_code=400,
+            detail="Repair description is required",
+        )
+
+    return {
+        "date": repair_date.isoformat(),
+        "month": month,
+        "day": day,
+        "year": year,
+        "repair": clean_repair,
+    }
+
+
+@app.get("/api/repair-logs", tags=["Repair Logs"])
+def show_repair_logs():
+    with state_lock:
+        return {
+            "logs": repair_logs.to_list()
+        }
+
+
+@app.post("/api/repair-logs", tags=["Repair Logs"])
+def add_repair_log(payload: RepairLogRequest):
+    log = validate_repair_log(
+        payload.month,
+        payload.day,
+        payload.year,
+        payload.repair,
+    )
+
+    with state_lock:
+        repair_logs.append(log)
+
+    return log
+
+
+@app.post(
+    "/api/repair-logs/insert",
+    tags=["Repair Logs"],
+)
+def insert_repair_log(
+    payload: InsertRepairLogRequest
+):
+    log = validate_repair_log(
+        payload.month,
+        payload.day,
+        payload.year,
+        payload.repair,
+    )
+
+    with state_lock:
+        try:
+            repair_logs.insert(
+                log,
+                payload.index,
+            )
+        except IndexError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
+
+    return log
+
+
+@app.delete(
+    "/api/repair-logs/{index}",
+    tags=["Repair Logs"],
+)
+def delete_repair_log(index: int):
+    with state_lock:
+        try:
+            return repair_logs.pop(index)
+        except IndexError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="Repair log not found",
+            ) from exc
+
+
+# -----------------------------------------------------------------------
+# Repair process: Graph
+# -----------------------------------------------------------------------
+
+@app.get(
+    "/api/repair-process",
+    tags=["Repair Process"],
+)
+def repair_process_services():
+    return {
+        "services": list(REPAIR_WORKFLOWS)
+    }
+
+
+@app.get(
+    "/api/repair-process/{service_name}",
+    tags=["Repair Process"],
+)
+def get_repair_process(service_name: str):
+    normalized = (
+        service_name
+        .strip()
+        .lower()
+        .replace("_", " ")
+    )
+
+    if normalized not in REPAIR_WORKFLOWS:
+        raise HTTPException(
+            status_code=404,
+            detail="Service does not exist",
+        )
+
+    procedures = REPAIR_WORKFLOWS[normalized]
+    total_minutes = sum(
+        minutes
+        for _, minutes in procedures
+    )
+
+    first_node = (
+        f"{normalized}: {procedures[0][0]}"
+    )
+
+    return {
+        "service": normalized,
+        "steps": [
+            {
+                "step_number": index + 1,
+                "step": step,
+                "minutes": minutes,
+                "graph_node": (
+                    f"{normalized}: {step}"
+                ),
+            }
+            for index, (step, minutes)
+            in enumerate(procedures)
+        ],
+        "total_minutes": total_minutes,
+        "hours": total_minutes // 60,
+        "remaining_minutes": total_minutes % 60,
+        "bfs_order": repair_graph.bfs(first_node),
+        "dfs_order": repair_graph.dfs(first_node),
+    }
+
+
+# -----------------------------------------------------------------------
+# RAG
+# -----------------------------------------------------------------------
+
+@app.post("/api/rag/query", tags=["RAG"])
+def ask_manual(payload: RAGQueryRequest):
+    try:
+        return query_manual(
+            payload.question,
+            payload.top_k,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"RAG query failed: {exc}",
+        ) from exc
+
+
+UPLOAD_DIR = (
+    Path(__file__).resolve().parent
+    / "rag_ai"
+    / "uploads"
+)
+UPLOAD_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+
+@app.post("/api/rag/upload", tags=["RAG"])
+async def upload_manual(
+    file: UploadFile = File(...)
+):
+    filename = Path(
+        file.filename or "manual.pdf"
+    ).name
+
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are accepted",
+        )
+
+    destination = UPLOAD_DIR / filename
+
+    with destination.open("wb") as output:
+        shutil.copyfileobj(
+            file.file,
+            output,
+        )
+
+    event_ids = await inngest_client.send(
+        inngest.Event(
+            name="rag/ingest_pdf",
+            data={
+                "pdf_path": str(
+                    destination.resolve()
+                ),
+                "source_id": filename,
+            },
+        )
+    )
+
+    return {
+        "message": (
+            "PDF uploaded and ingestion was triggered"
+        ),
+        "filename": filename,
+        "event_ids": event_ids,
+    }
+
+
+inngest.fast_api.serve(
+    app,
+    inngest_client,
+    [
+        rag_ingest_pdf,
+        rag_query_pdf_ai,
+    ],
+)
