@@ -40,7 +40,7 @@ process_column, undo_column, redo_column = st.columns(3)
 
 if process_column.button(
     "Process next",
-    use_container_width=True,
+    width="stretch",
 ):
     try:
         result = process_appointment()
@@ -53,7 +53,7 @@ if process_column.button(
 
 if undo_column.button(
     "Undo",
-    use_container_width=True,
+    width="stretch",
 ):
     try:
         undo_appointment()
@@ -64,7 +64,7 @@ if undo_column.button(
 
 if redo_column.button(
     "Redo",
-    use_container_width=True,
+    width="stretch",
 ):
     try:
         redo_appointment()
@@ -93,7 +93,7 @@ try:
     if rows:
         st.dataframe(
             rows,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     else:

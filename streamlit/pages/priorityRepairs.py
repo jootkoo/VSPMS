@@ -68,7 +68,7 @@ peek_column, process_column = st.columns(2)
 
 if peek_column.button(
     "View highest priority",
-    use_container_width=True,
+    width="stretch",
 ):
     try:
         st.json(peek_priority_repair())
@@ -77,7 +77,7 @@ if peek_column.button(
 
 if process_column.button(
     "Process highest priority",
-    use_container_width=True,
+    width="stretch",
 ):
     try:
         result = process_priority_repair()
@@ -95,7 +95,7 @@ try:
     if repairs:
         st.dataframe(
             repairs,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     else:

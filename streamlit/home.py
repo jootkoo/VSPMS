@@ -93,6 +93,6 @@ for start in range(0, len(pages), 3):
                 if st.button(
                     f"Open {title}",
                     key=path,
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     st.switch_page(path)

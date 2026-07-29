@@ -163,7 +163,7 @@ with range_tab:
             if result["items"]:
                 st.dataframe(
                     result["items"],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -205,7 +205,7 @@ try:
     if inventory["items"]:
         st.dataframe(
             inventory["items"],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 

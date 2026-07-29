@@ -79,7 +79,7 @@ previous_column, next_column = st.columns(2)
 if previous_column.button(
     "Previous step",
     disabled=index == 0,
-    use_container_width=True,
+    width="stretch",
 ):
     st.session_state.repair_step_index -= 1
     st.rerun()
@@ -87,7 +87,7 @@ if previous_column.button(
 if next_column.button(
     "Mark complete / Next",
     disabled=index == len(steps) - 1,
-    use_container_width=True,
+    width="stretch",
 ):
     st.session_state.repair_step_index += 1
     st.rerun()
@@ -95,7 +95,7 @@ if next_column.button(
 with st.expander("View complete workflow"):
     st.dataframe(
         steps,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
