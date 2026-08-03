@@ -8,7 +8,8 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from data_structures.bst import BinarySearchTree #data structure imports
+#data structure imports
+from data_structures.bst import BinarySearchTree 
 from data_structures.graph import Graph
 from data_structures.hashmap import HashMap
 from data_structures.linkedList import dLinkedList
@@ -28,8 +29,10 @@ from rag_ai.ragAI import (
 # Shared in-memory data-structure instances
 # -----------------------------------------------------------------------
 
+#reentrant lock, locks if the api recieves a bunch of request at the same time, multiple routes will modify at the same time
 state_lock = RLock()
 
+#initializing the data structures from the data structures folder
 appointments = Queue()
 appointment_undo = Stack()
 appointment_redo = Stack()
@@ -45,11 +48,12 @@ repair_logs = dLinkedList()
 # API response helpers
 # -----------------------------------------------------------------------
 
+# reads the Queue from front to rear without changing the Queue class
 def get_appointment_values():
-    #Read the Queue from front to rear without changing the Queue class
     values = []
+    #start from the front
     current_node = appointments.front
-
+    #goes all the way until it reaches the end which should be none
     while current_node is not None:
         values.append(current_node.value)
         current_node = current_node.next
@@ -58,24 +62,23 @@ def get_appointment_values():
 
 
 
-
+#Empty a Stack by popping all elements unitl empty
 def clear_stack(stack):
-    #Empty a Stack using only its existing public methods
     while not stack.is_empty():
         stack.pop()
 
+#The root of the MaxHeap is the largest value, but the entire heap
+#array is not guaranteed to be in descending order
+#returns in sorted order
 def get_ordered_priority_repairs():
-    #The root of the MaxHeap is the largest value, but the entire heap
-    #array is not guaranteed to be in descending order
     return sorted(
         priority_repairs.heap,
         key=lambda repair: repair[0],
         reverse=True,
     )
 
-
+#Read the doubly linked list from head to tail without changing it
 def get_repair_log_values():
-    #Read the doubly linked list from head to tail without changing it
     values = []
     current_node = repair_logs.head
 
@@ -86,18 +89,20 @@ def get_repair_log_values():
     return values
 
 
-
+#iterate through dlinkedlist to remove at index
 def remove_repair_log_at_index(index):
     #Validate the requested linked-list position
     if index < 0 or index >= len(repair_logs):
         raise IndexError("Repair log not found")
 
-    #Move from the head to the requested node
+    # move from the head to the requested node
     current_node = repair_logs.head
 
+    #iterate to the index
     for _ in range(index):
         current_node = current_node.next
 
+    
     removed_value = current_node.value
 
     #Reconnect the node before the removed node
@@ -119,10 +124,12 @@ def remove_repair_log_at_index(index):
 
     return removed_value
 
+#initialize the workflows existing (would be replaced with items inside a database)
 REPAIR_WORKFLOWS = {'fuel leak': [('Confirm fuel leak', 10), ('Shut vehicle off and isolate ignition sources', 2), ('Identify fuel type and leak location', 10), ('Relieve fuel-system pressure', 15), ('Inspect fuel lines, hoses, tank, rail, injectors, and seals', 10), ('Replace damaged component', 90), ('Reconnect fuel system', 20), ('Pressurize fuel system', 10), ('Check for additional leaks', 10), ('Clear related diagnostic codes', 5), ('Road test and recheck', 15)], 'complete brake failure': [('Do not drive vehicle', 2), ('Tow vehicle into service bay', 30), ('Inspect brake fluid level', 10), ('Check for external brake fluid leaks', 10), ('Inspect master cylinder', 10), ('Inspect brake lines and hoses', 10), ('Inspect calipers and wheel cylinders', 10), ('Inspect brake booster and pedal linkage', 10), ('Repair failed brake component', 90), ('Refill brake fluid', 5), ('Bleed brake system', 30), ('Verify brake pedal pressure', 10), ('Perform low-speed brake test', 10), ('Perform final leak inspection', 10)], 'engine overheating': [('Allow engine to cool', 30), ('Check coolant level', 10), ('Inspect for coolant leaks', 10), ('Pressure-test cooling system', 30), ('Inspect radiator', 10), ('Inspect cooling system hoses and reservoir', 10), ('Test radiator fan', 20), ('Test thermostat', 20), ('Test water pump', 20), ('Check radiator cap', 10), ('Check for combustion gases in coolant', 20), ('Repair failed cooling system component', 90), ('Refill and bleed cooling system', 30), ('Run engine to operating temperature', 15), ('Verify engine temperature stability', 10), ('Road test vehicle', 15)], 'tire sidewall bulge': [('Do not drive vehicle at high speed', 2), ('Inspect damaged tire', 10), ('Confirm tire sidewall damage', 10), ('Inspect wheel for impact damage', 10), ('Remove wheel', 8), ('Remove damaged tire', 10), ('Inspect valve stem or TPMS sensor', 10), ('Mount replacement tire', 15), ('Balance wheel', 10), ('Reinstall wheel', 8), ('Torque lug nuts', 5), ('Set tire pressure', 5), ('Verify TPMS operation', 10)], 'flashing check engine light': [('Reduce engine load and stop driving if engine is shaking', 2), ('Scan diagnostic trouble codes', 10), ('Record freeze-frame data', 5), ('Inspect for active engine misfire', 10), ('Inspect ignition coils', 10), ('Inspect spark plugs', 10), ('Inspect fuel injectors', 10), ('Check fuel pressure', 10), ('Check engine compression if required', 45), ('Repair cause of engine misfire', 60), ('Clear diagnostic trouble codes', 5), ('Run misfire monitor', 10), ('Road test vehicle', 15), ('Rescan for diagnostic trouble codes', 10)], 'brake pad replacement': [('Inspect brake system', 10), ('Measure brake pad thickness', 10), ('Measure brake rotor condition', 10), ('Lift vehicle', 10), ('Remove wheel', 8), ('Remove brake caliper', 15), ('Remove old brake pads', 10), ('Inspect caliper and slide pins', 10), ('Service caliper slide pins', 10), ('Retract caliper piston', 10), ('Replace or machine brake rotor if required', 45), ('Install new brake pads', 10), ('Reinstall brake caliper', 15), ('Reinstall wheel', 8), ('Torque lug nuts', 5), ('Pump brake pedal', 3), ('Check brake fluid level', 10), ('Bed in brake pads', 20), ('Road test brakes', 15)], 'transmission slipping': [('Confirm transmission slipping symptom', 10), ('Scan engine and transmission codes', 10), ('Check transmission fluid level', 10), ('Inspect transmission fluid condition', 10), ('Check transmission for leaks', 10), ('Inspect shift linkage and electronic controls', 10), ('Review live transmission data', 20), ('Perform transmission pressure tests if required', 30), ('Inspect transmission solenoids and valve body', 10), ('Determine internal or external transmission fault', 30), ('Repair or replace failed transmission component', 240), ('Refill correct transmission fluid', 20), ('Perform transmission adaptation or relearn', 30), ('Road test vehicle', 15), ('Recheck transmission fluid and codes', 10)], 'steady check engine light': [('Scan diagnostic trouble codes', 10), ('Record freeze-frame data', 5), ('Inspect wiring, connectors, and vacuum lines', 10), ('Test system identified by diagnostic code', 30), ('Determine whether fault is current or intermittent', 15), ('Repair root cause', 60), ('Clear diagnostic trouble codes', 5), ('Complete required drive cycle', 30), ('Verify emissions monitors', 10), ('Rescan for diagnostic trouble codes', 10)], 'wheel alignment': [('Check tire pressure', 10), ('Inspect tire wear', 10), ('Inspect wheel condition', 10), ('Inspect steering components', 10), ('Inspect suspension components', 10), ('Check vehicle ride height', 10), ('Replace worn steering or suspension components if required', 120), ('Mount alignment sensors', 15), ('Measure caster, camber, and toe', 15), ('Adjust rear alignment if applicable', 20), ('Adjust front alignment', 20), ('Center steering wheel', 10), ('Record final alignment measurements', 10), ('Road test vehicle', 15)], 'oil change': [('Confirm engine oil specification and capacity', 10), ('Warm engine slightly', 5), ('Lift or secure vehicle', 10), ('Remove oil drain plug', 5), ('Drain old engine oil', 10), ('Replace drain plug washer if required', 10), ('Reinstall and torque drain plug', 5), ('Remove old oil filter', 5), ('Install new oil filter', 5), ('Add new engine oil', 5), ('Start engine', 2), ('Verify oil pressure warning turns off', 10), ('Check for oil leaks', 10), ('Shut engine off', 2), ('Recheck engine oil level', 10), ('Reset maintenance reminder', 3)], 'tire rotation': [('Inspect tires', 10), ('Check tire tread depth', 10), ('Check tire pressure', 10), ('Determine correct tire rotation pattern', 10), ('Lift vehicle', 10), ('Remove wheels', 15), ('Move wheels to assigned positions', 10), ('Inspect brakes while wheels are removed', 10), ('Reinstall wheels', 15), ('Torque lug nuts', 5), ('Adjust tire pressures', 5), ('Reset or relearn TPMS if required', 15), ('Road test vehicle', 15)], 'air filter replacement': [('Identify correct engine air filter', 10), ('Open air filter housing', 5), ('Remove old air filter', 5), ('Inspect air filter housing and intake duct', 10), ('Clean loose debris from housing', 5), ('Install new air filter in correct orientation', 5), ('Close and secure air filter housing', 5), ('Inspect intake connections', 10), ('Start engine', 2), ('Verify normal engine operation', 10)], 'ac repair': [('Confirm air conditioning complaint', 10), ('Inspect drive belt and compressor operation', 10), ('Check blower motor operation', 10), ('Scan HVAC control module if applicable', 10), ('Measure vent temperature', 10), ('Check refrigerant system pressures', 15), ('Leak-test air conditioning system', 25), ('Recover refrigerant using approved equipment', 30), ('Repair leaking or failed component', 120), ('Replace receiver-drier or accumulator if required', 60), ('Evacuate air conditioning system', 30), ('Verify system vacuum holds', 15), ('Recharge correct amount of refrigerant', 20), ('Add correct compressor oil if required', 10), ('Test vent temperature and system pressures', 20), ('Perform final refrigerant leak check', 10)], 'cosmetic': [('Inspect and photograph cosmetic damage', 10), ('Identify affected panels and trim', 10), ('Estimate required labor and materials', 20), ('Remove damaged trim or panel if required', 30), ('Repair dents, scratches, or cracks', 90), ('Sand damaged area', 30), ('Apply body filler if required', 30), ('Sand and shape repaired area', 30), ('Apply primer', 25), ('Match paint color', 20), ('Apply base coat', 30), ('Apply clear coat', 30), ('Cure paint', 120), ('Polish and blend repaired area', 45), ('Reinstall trim or panels', 30), ('Perform final quality inspection', 10)]}
+#states that the graph is directed, instructions point to another in order
 repair_graph = Graph(directed=True)
 
-
+#creates the graph structure with current repairflows and steps. (would be replaced with database)
 def build_repair_graph():
     for service_name, procedures in REPAIR_WORKFLOWS.items():
         for index in range(len(procedures) - 1):
@@ -141,8 +148,10 @@ build_repair_graph()
 
 # -----------------------------------------------------------------------
 # Request models
+# describes json structure that fastAPI expects from the frontend - type checking convert json to python obj etc.
 # -----------------------------------------------------------------------
 
+#meains appointment must contain ONE field, string 
 class AppointmentRequest(BaseModel):
     appointment: str
 
@@ -179,7 +188,7 @@ class RAGQueryRequest(BaseModel):
         le=20,
     )
 
-
+#would be replaced with database
 SERVICE_URGENCY = {
     "fuel leak": 100,
     "complete brake failure": 99,
@@ -202,6 +211,8 @@ SERVICE_URGENCY = {
 # App setup
 # -----------------------------------------------------------------------
 
+# creates fastAPI app object 
+# uvicorn main:app <- file , api app
 app = FastAPI(
     title="VSPMS API",
     description=(
@@ -211,6 +222,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# CORS - Cross origin resource sharing middleware
+# controls whether one app is allowed to send request to another at a different origin
+# allows origins 8501 and 8000 to connect to fastAPI
+#allow credentials allows cookies auth info etc.
+#allow methods allows get post put delete etc.abs
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -222,7 +238,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+#creates route for (health) and groups the route in fastAPIs doc page
+#used to confirm backend is online
 @app.get("/api/health", tags=["System"])
 def health():
     return {
@@ -230,7 +247,7 @@ def health():
         "service": "VSPMS API",
     }
 
-
+#creates route, has state lock on functions shown on the dashboard
 @app.get("/api/dashboard", tags=["System"])
 def dashboard():
     with state_lock:
@@ -246,6 +263,8 @@ def dashboard():
 # Appointments: Queue + Stacks
 # -----------------------------------------------------------------------
 
+
+#shows summary of current appointment system
 def appointment_snapshot():
     return {
         "appointments": get_appointment_values(),
@@ -254,17 +273,20 @@ def appointment_snapshot():
         "redo_count": len(appointment_redo),
     }
 
-
+#route initialized get
 @app.get("/api/appointments", tags=["Appointments"])
 def show_appointments():
     with state_lock:
         return appointment_snapshot()
 
-
+#route init post
 @app.post("/api/appointments/add", tags=["Appointments"])
+#function has appointment request as the payload
 def add_appointment(payload: AppointmentRequest):
     clean_appointment = payload.appointment.strip()
+    #removes whitespace from beginning and end 
 
+    #checks if string is empty
     if not clean_appointment:
         raise HTTPException(
             status_code=400,
@@ -838,6 +860,7 @@ def get_repair_process(service_name: str):
 # RAG
 # -----------------------------------------------------------------------
 
+#this route sends question to RAG system 
 @app.post("/api/rag/query", tags=["RAG"])
 def ask_manual(payload: RAGQueryRequest):
     try:
@@ -910,7 +933,7 @@ async def upload_manual(
         "event_ids": event_ids,
     }
 
-
+# connects inngest workflows to existing fastAPI
 inngest.fast_api.serve(
     app,
     inngest_client,
